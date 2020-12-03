@@ -84,8 +84,8 @@
 
   {:crux.db/id :tmdb/credit-55f44ee09251413a960026d5,
    :tmdb/type :credit,
-   :tmdb.movie/id {:eid :tmdb/movie-5516},
-   :tmdb.cast/id {:eid :tmdb/cast-17305},
+   :tmdb.movie/id :tmdb/movie-5516,
+   :tmdb.cast/id :tmdb/cast-17305,
    :tmdb.cast/character "TV Commercial Director"}
   )
 
@@ -95,15 +95,86 @@
 
   (def mem-node (c/start-node {}))
 
+  (c/status mem-node)
+
   ;; transactions
 
+  (c/submit-tx mem-node [[:crux.tx/put {:crux.db/id :jeremy
+                                        :location :uk}]
+                         [:crux.tx/put {:crux.db/id :jeremy
+                                        :success :true
+                                        :location :uk}]
+                         [:crux.tx/put {:crux.db/id :jeremy
+                                        :location :uk}]
+                         [:crux.tx/delete :jeremy]])
+
+
+  (c/submit-tx mem-node [[:crux.tx/match {:crux.db/id :jeremy
+                                          :counter 1}]
+                         [:crux.tx/put {:crux.db/id :jeremy
+                                        :counter 2}]
+                         [:crux.tx/put {:crux.db/id :jeremy
+                                        :success :true
+                                        :location :uk}]
+                         [:crux.tx/put {:crux.db/id :jeremy
+                                        :location :uk}]
+                         [:crux.tx/delete :jeremy]])
+
+  (c/entity (c/db mem-node) :jeremy)
+  (c/entity-history (c/db mem-node) :jeremy :asc)
+
+(time
+ (do
+   (->>  (c/submit-tx mem-node [[:crux.tx/put {:crux.db/id :jeremy
+                                               :location :uk}]
+                                [:crux.tx/put {:crux.db/id :jon
+                                               :location :scotland}]])
+
+         (c/await-tx mem-node))
+   (c/entity (c/db mem-node) :jon)))
 
   ;; await-tx & sync
+
+(time
+ (do
+   (c/submit-tx mem-node [[:crux.tx/put {:crux.db/id :jeremy
+                                         :location :uk}]
+                          [:crux.tx/put {:crux.db/id :jeremy
+                                         :location :portugal}
+                           #inst "2020-11-02"
+                           #inst "2020-11-07"]
+
+                          [:crux.tx/put {:crux.db/id :jon
+                                         :location :portugal}
+                           #inst "2020-11-04"
+                           #inst "2020-11-06"]
+                          [:crux.tx/put {:crux.db/id :jon
+                                         :location :spain}
+                           #inst "2020-12-04"
+                           #inst "2020-12-06"]
+                          [:crux.tx/put {:crux.db/id :jon
+                                         :location :uk}
+                           ]
+                          ])
+   (c/sync mem-node)
+   (c/entity (c/db mem-node) :jon))
+)
+(def mynode mem-node)
+
+(q '{:find [(eql/project ?e [*]) (eql/project ?e2 [*])]
+     :where [[?e :location ?l]
+             [(not= ?e ?e2)]
+             [?e2 :location ?l]]}
+   #inst "2020-11-05"
+)
 
 
   ;; entity-history
 
 
+
+  (c/entity-history (c/db mem-node #inst "2020-12-11") :jon :asc {:with-docs? true})
+ 
   ;; open-tx-log
 
 
@@ -112,23 +183,94 @@
 
   ;; helpers
   (defn q [m & [vt tt]]
-    (c/q (c/db mynode vt tt) (assoc m :limit 10)))
+    (c/q (c/db mynode vt tt) (merge {:limit 10} m)))
 
   (defn e [eid & [vt tt]]
     (c/entity (c/db mynode vt tt) eid))
 
   ;; simple query - triple clauses
 
+  (c/q (c/db mynode)
+       '{:find [?e]
+         :where [[?e :crux.db/id ?e]]
+         :limit 10})
+
+  (q '{:find [?e ?t]
+      :where [[?e :tmdb.movie/title ?t]]
+      })
+
+  (e :tmdb/movie-10027)
+
+  (q '{:find [?e ?title ?date]
+       :where [[?e :tmdb.movie/title ?title]
+               [?e :tmdb.movie/release_date ?date]]
+       })
+
 
   ;; boolean predicate (filter)
+
+  (q '{:find [?e ?title ?date]
+       :where [[?e :tmdb.movie/title ?title]
+               [?e :tmdb.movie/release_date ?date]
+               [(> ?date "2006")]]
+       })
+
 
 
   ;; predicates with return lvars
 
 
+  (q '{:find [?e ?title ?date ?profit ?budget ?revenue]
+       :where [[?e :tmdb.movie/title ?title]
+               [?e :tmdb.movie/release_date ?date]
+               [(> ?date "2006")]
+               [?e :tmdb.movie/budget ?budget]
+               [(> ?budget 0)]
+               [?e :tmdb.movie/revenue ?revenue]
+               [(- ?revenue ?budget) ?profit]]
+       })
+
+  (defn minus [a b]
+    (if (string? b)
+      0
+      (- a b))
+    )
+
+  (q '{:find [?e ?title ?date ?profit ?budget ?revenue]
+       :where [[?e :tmdb.movie/title ?title]
+               [?e :tmdb.movie/release_date ?date]
+               [(> ?date "2006")]
+               [?e :tmdb.movie/budget ?budget]
+               [(> ?budget 0)]
+               [?e :tmdb.movie/revenue ?revenue]
+               [(myproject.core/minus ?revenue ?title) ?profit]]
+       })
+
+
+
+
   ;; not
 
+  (q '{:find [?e ?title ?date]
+       :where [[?e :tmdb.movie/title ?title]
+               [?e :tmdb.movie/release_date ?date]
+               (not [?e :foo :bar])
+               (not [(> ?date "2006")])
+               ]
+       })
+
   ;; order-by
+
+  (q '{:find [(max ?budget) ?title]
+       :where [[?e :tmdb.movie/title ?title]
+               [?e :tmdb.movie/release_date ?date]
+               [(> ?date "2006")]
+               [?e :tmdb.movie/budget ?budget]
+               ]
+       :limit 1
+       })
+
+
   ;; Q: What is the movie with the highest revenue?
   ;; Q: What is the movie that made the biggest loss?
 
@@ -136,9 +278,48 @@
   ;; join
   ;; Q: Which characters are in the movie "Alien"?
 
+  (q '{:find [?e ?credit ?character]
+       :where [[?e :tmdb.movie/title "Alien"]
+               [?credit :tmdb.movie/id ?e]
+               [?credit :tmdb.cast/character ?character]
+               [?character :tmdb.cast/name ?name] 
+               ]
+       })
+
+
+  (q
+   '{:find [?e ?credit ?character ?name]
+     :where [[?e :tmdb.movie/title "Alien"]
+             [?credit :tmdb.movie/id ?e]
+             [?credit :tmdb.cast/character ?character]
+             [?credit :tmdb.cast/id ?cast]
+             [?cast :tmdb.cast/name ?name]
+             ]}) 
+
+  ;; What are the movies where a cast member plays multiple characters
+
+
 
   ;; or
   ;; Q: Which actors star in the movies "Alien" or "Aliens"?
+
+  (q '{:find [?actor-name]
+       :where [[?credit :tmdb.cast/id ?actor]
+               [?credit :tmdb.movie/id ?movie]
+               (or [?movie :tmdb.movie/title "Alien"]
+                   [?movie :tmdb.movie/title "Aliens"])
+               [?actor :tmdb.cast/name ?actor-name]]}) 
+
+
+  (q '{:find [?actor-name]
+       :where [[?credit :tmdb.cast/id ?actor]
+               [?credit :tmdb.movie/id ?movie]
+               #_[?movie :tmdb.movie/title #{"Aliens" "Alien"}]
+               (or-join [?movie]
+                        [?movie :tmdb.movie/title "Alien"]
+                        [(text-seach :tmdb.movie/title  )]
+                        [?movie :tmdb.movie/title "Aliens"])
+               [?actor :tmdb.cast/name ?actor-name]]}) 
 
 
   ;; and
@@ -155,15 +336,38 @@
   ;; eql/project
   ;; Q: Retrieve all cast documents for all movies
 
+  (q {:find '[(eql/project e [{:tmdb.movie/_id [{:tmdb.cast/id [*]}]}])]
+      :where '[[e :tmdb/type :movie]]})
+
+  (q '{:find [(eql/project ?cast [*])]
+       :where [[?cast :tmdb.cast/id]]})
 
   ;; aggregations
   ;; Q: What is the total cast size for the movie "Alien"?
 
 
-  ;; args / in
+  ;; :args / :in
+
+  (q '{:find [?e ?credit ?character]
+       :where [[?e :tmdb.movie/title ?movie]
+               [?credit :tmdb.movie/id ?e]
+               [?credit :tmdb.cast/character ?character]]
+       :args [{?movie "Alien"} {?movie #{"Aliens"}}]
+       })
+
 
 
   ;; open-q, limit & offset
+
+  (time
+   (doall
+    (take 40  (->  (c/open-q (c/db mynode) '{:find [?e ?credit ?character]
+                                               :where [[?e :tmdb.movie/title ?movie]
+                                                       [?credit :tmdb.movie/id ?e]
+                                                       [?credit :tmdb.cast/character ?character]]
+                                               })
+                     iterator-seq
+                     ))))
 
 
   ;; temporal db query
@@ -181,7 +385,13 @@
   ;; persistence & index rebuild
 
 
+  (c/latest-completed-tx rocks-node)
+
+  (c/q db valid-time transaction-time)
+
   )
+
+
 
 ;; solutions
 (comment
